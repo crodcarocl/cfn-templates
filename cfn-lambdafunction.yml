@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+    Small test of lambda function deployment By Carlos Rodriguez v1.0.0
+
+Parameters:
+  FunctionName:
+    Description: Choose a function name.
+    Type: String
+    Default: small-lambda-demo
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: lambda-role
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:*
+            Resource: arn:aws:logs:*:*:*
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: nodejs16.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+
+              console.log(event);
+
+              const number1 = event.queryStringParameters && event.queryStringParameters.number1;
+              const number2 = event.queryStringParameters && event.queryStringParameters.number2;
+              
+              let message = "Two numbers are needed to continue.";
+
+              if (event.queryStringParameters !== null && number1 !== undefined && number2 !== undefined) {
+
+                  message = "The sum of this two numbers is:" +" "+ (parseInt(number1) + parseInt(number2));
+              }
+              
+              const response = {
+                  statusCode: 200,
+                  body: JSON.stringify(message),
+              };
+              return response;
+          };
+      Description: Sum two numbers that comes as query string parameters.
+      TracingConfig:
+        Mode: Active
+
+  LambdaApiGateway:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${FunctionName}-apigw
+      Description: Create API Gateway for small lambda demo.
+      ProtocolType: HTTP
+      Target: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${FunctionName}/invocations
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: "lambda:InvokeFunction"
+      Principal: apigateway.amazonaws.com
+
+  LambdaApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref LambdaApiGateway
+      RouteKey: !Sub "ANY /${FunctionName}"
+      AuthorizationType: AWS_IAM
+
+  AGWLDIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref LambdaApiGateway
+      Description: Integration proxy for small lambda.
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${FunctionName}/invocations
